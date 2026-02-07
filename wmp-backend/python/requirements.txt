@@ -5,3 +5,4 @@ weaviate-client==4.19.2
 python-dotenv==1.2.1
 tqdm==4.67.3
 tf-keras==2.20.1
+python-multipart==0.0.22
