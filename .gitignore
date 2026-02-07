@@ -1,3 +1,7 @@
+# idea
+.idea/
+
+
 # lockfiles
 package-lock.json
 yarn.lock
