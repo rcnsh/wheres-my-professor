@@ -1,0 +1,21 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+android {
+  namespace "expo.modules.presageemotion"
+  defaultConfig {
+    minSdk 26
+  }
+}
+
+repositories {
+  google()
+  mavenCentral()
+  maven { url = uri("https://jitpack.io") }
+}
+
+dependencies {
+  implementation "com.presagetech:smartspectra:1.0.26"
+}

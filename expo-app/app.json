@@ -16,7 +16,8 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "This app uses the camera to take photos with front and back cameras."
-      }
+      },
+      "bundleIdentifier": "com.derrick-lim.expoapp"
     },
     "android": {
       "adaptiveIcon": {
@@ -24,7 +25,11 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "permissions": ["android.permission.CAMERA"]
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.derrick_lim.expoapp"
     },
     "web": {
       "favicon": "./assets/favicon.png"
