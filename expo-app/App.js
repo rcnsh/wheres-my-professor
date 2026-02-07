@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from 'react';
+import { useRef, useState, useCallback, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
@@ -9,7 +9,7 @@ import {
   Platform,
   Dimensions,
   ActivityIndicator,
-  ScrollView,
+  Animated,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import {
@@ -22,6 +22,8 @@ import * as FileSystem from 'expo-file-system';
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL ?? 'http://localhost:3000/api/analyse';
+const VISION_BACKEND_URL = process.env.EXPO_PUBLIC_VISION_BACKEND_URL ?? 'http://localhost:3000/api/identify';
+const SAVE_URL = process.env.EXPO_PUBLIC_SAVE_URL ?? 'http://localhost:3000/api/save';
 
 const EMOTION_EMOJIS = {
   happy: '😊',
@@ -61,6 +63,11 @@ export default function App() {
   const [frontBase64, setFrontBase64] = useState(null);
   const [sending, setSending] = useState(false);
   const [emotionData, setEmotionData] = useState(null);
+  const [professorData, setProfessorData] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const successScale = useRef(new Animated.Value(0)).current;
+  const successOpacity = useRef(new Animated.Value(0)).current;
   const pendingFront = useRef(false);
 
   // Auto-snap selfie once the front camera initialises
@@ -149,6 +156,7 @@ export default function App() {
     setBackBase64(null);
     setFrontBase64(null);
     setEmotionData(null);
+    setProfessorData(null);
     setStep(STEP_BACK);
   }
 
@@ -156,6 +164,7 @@ export default function App() {
     if (!backPhotoPath || !frontPhotoPath) return;
     setSending(true);
     setEmotionData(null);
+    setProfessorData(null);
     try {
       // Convert both to base64
       const [back64, front64] = await Promise.all([
@@ -166,47 +175,147 @@ export default function App() {
       setBackBase64(back64);
       setFrontBase64(front64);
 
-      // Send front (selfie) image for emotion analysis
-      let emotions;
-      try {
-        const response = await fetch(BACKEND_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            image: front64,
-            timestamp: new Date().toISOString(),
-          }),
-        });
+      const timestamp = new Date().toISOString();
 
-        if (!response.ok) {
-          throw new Error(`Server responded with ${response.status}`);
-        }
-
-        emotions = await response.json();
-      } catch (networkErr) {
-        // Fallback: use dummy data while backend is not available
-        console.warn('Backend unavailable, using dummy emotion data:', networkErr.message);
-        emotions = [
-          { label: 'surprise', score: 0.9360453486442566 },
-          { label: 'fear', score: 0.023657215759158134 },
-          { label: 'happy', score: 0.018095578998327255 },
-          { label: 'angry', score: 0.009856591001152992 },
-          { label: 'neutral', score: 0.004771077074110508 },
-        ];
-      }
+      // Send both requests in parallel
+      const [emotions, professor] = await Promise.all([
+        // Front (selfie) → emotion analysis
+        (async () => {
+          try {
+            const response = await fetch(BACKEND_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ image: front64, timestamp }),
+            });
+            if (!response.ok) throw new Error(`Server responded with ${response.status}`);
+            return await response.json();
+          } catch (err) {
+            console.warn('Emotion backend unavailable, using dummy data:', err.message);
+            return [
+              { label: 'surprise', score: 0.9360453486442566 },
+              { label: 'fear', score: 0.023657215759158134 },
+              { label: 'happy', score: 0.018095578998327255 },
+              { label: 'angry', score: 0.009856591001152992 },
+              { label: 'neutral', score: 0.004771077074110508 },
+            ];
+          }
+        })(),
+        // Back (scene) → professor identification
+        (async () => {
+          try {
+            const response = await fetch(VISION_BACKEND_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ image: back64, timestamp }),
+            });
+            if (!response.ok) throw new Error(`Server responded with ${response.status}`);
+            return await response.json();
+          } catch (err) {
+            console.warn('Vision backend unavailable, using dummy data:', err.message);
+            return {
+              name: 'Dr. Smith',
+              confidence: 0.92,
+              department: 'Computer Science',
+            };
+          }
+        })(),
+      ]);
 
       setEmotionData(emotions);
-
-      // TODO: Send back camera image to vision model endpoint
-      // const visionResponse = await fetch(VISION_BACKEND_URL, {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify({ image: back64, timestamp: new Date().toISOString() }),
-      // });
+      setProfessorData(professor);
     } catch (e) {
       Alert.alert('Send failed', e?.message ?? 'Unknown error');
     } finally {
       setSending(false);
+    }
+  }
+
+  function resetToCamera() {
+    setBackPhotoPath(null);
+    setFrontPhotoPath(null);
+    setBackBase64(null);
+    setFrontBase64(null);
+    setEmotionData(null);
+    setProfessorData(null);
+    setSaving(false);
+    setShowSuccess(false);
+    successScale.setValue(0);
+    successOpacity.setValue(0);
+    setStep(STEP_BACK);
+  }
+
+  async function handleSave() {
+    if (!emotionData || !professorData) return;
+    setSaving(true);
+    try {
+      // Collect top 2 emotions
+      const topEmotions = emotionData.slice(0, 2).map((e) => ({
+        label: e.label,
+        score: e.score,
+      }));
+
+      const record = {
+        emotions: topEmotions,
+        professor: {
+          name: professorData.name,
+          confidence: professorData.confidence,
+          department: professorData.department,
+        },
+        images: {
+          front: frontBase64,
+          back: backBase64,
+        },
+        timestamp: new Date().toISOString(),
+      };
+
+      try {
+        const response = await fetch(SAVE_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(record),
+        });
+        if (!response.ok) throw new Error(`Server responded with ${response.status}`);
+      } catch (err) {
+        // Dummy fallback — just log while backend is not available
+        console.warn('Save backend unavailable, data logged locally:', err.message);
+        console.log('Record to save:', JSON.stringify({
+          emotions: record.emotions,
+          professor: record.professor,
+          timestamp: record.timestamp,
+          frontImageLength: record.images.front?.length,
+          backImageLength: record.images.back?.length,
+        }));
+      }
+
+      // Show checkmark animation
+      setShowSuccess(true);
+      Animated.parallel([
+        Animated.spring(successScale, {
+          toValue: 1,
+          friction: 4,
+          tension: 60,
+          useNativeDriver: true,
+        }),
+        Animated.timing(successOpacity, {
+          toValue: 1,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        // Hold for a moment, then fade out and reset
+        setTimeout(() => {
+          Animated.timing(successOpacity, {
+            toValue: 0,
+            duration: 400,
+            useNativeDriver: true,
+          }).start(() => {
+            resetToCamera();
+          });
+        }, 1200);
+      });
+    } catch (e) {
+      Alert.alert('Save failed', e?.message ?? 'Unknown error');
+      setSaving(false);
     }
   }
 
@@ -225,6 +334,20 @@ export default function App() {
         <View style={styles.previewPip}>
           <Image source={{ uri: `file://${frontPhotoPath}` }} style={styles.previewPipImage} />
         </View>
+
+        {/* Professor detection badge */}
+        {professorData && (
+          <View style={styles.professorBadge}>
+            <Text style={styles.professorIcon}>🎓</Text>
+            <View style={styles.professorInfo}>
+              <Text style={styles.professorName}>{professorData.name}</Text>
+              <Text style={styles.professorDept}>{professorData.department}</Text>
+              <Text style={styles.professorConfidence}>
+                {(professorData.confidence * 100).toFixed(0)}% match
+              </Text>
+            </View>
+          </View>
+        )}
 
         {/* Emotion results overlay */}
         {emotionData && (
@@ -279,20 +402,54 @@ export default function App() {
             <Text style={styles.retakeButtonText}>Retake</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.sendButton, sending && styles.sendButtonDisabled]}
-            onPress={handleSend}
-            disabled={sending}
-          >
-            {sending ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.sendButtonText}>
-                {emotionData ? 'Resend' : 'Send'}
-              </Text>
-            )}
-          </TouchableOpacity>
+          {emotionData && professorData ? (
+            <TouchableOpacity
+              style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+              onPress={handleSave}
+              disabled={saving}
+            >
+              {saving ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.saveButtonText}>Save</Text>
+              )}
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={[styles.sendButton, sending && styles.sendButtonDisabled]}
+              onPress={handleSend}
+              disabled={sending}
+            >
+              {sending ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.sendButtonText}>Send</Text>
+              )}
+            </TouchableOpacity>
+          )}
         </View>
+
+        {/* Success checkmark overlay */}
+        {showSuccess && (
+          <Animated.View
+            style={[
+              styles.successOverlay,
+              { opacity: successOpacity },
+            ]}
+          >
+            <Animated.View
+              style={[
+                styles.successCircle,
+                { transform: [{ scale: successScale }] },
+              ]}
+            >
+              <Text style={styles.successCheckmark}>✓</Text>
+            </Animated.View>
+            <Animated.Text style={[styles.successText, { opacity: successOpacity }]}>
+              Saved!
+            </Animated.Text>
+          </Animated.View>
+        )}
       </View>
     );
   }
@@ -520,6 +677,94 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',
+  },
+  saveButton: {
+    paddingVertical: 14,
+    paddingHorizontal: 36,
+    borderRadius: 24,
+    backgroundColor: '#22C55E',
+    minWidth: 100,
+    alignItems: 'center',
+  },
+  saveButtonDisabled: {
+    opacity: 0.6,
+  },
+  saveButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+
+  // ── Success overlay ──
+  successOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 100,
+  },
+  successCircle: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#22C55E',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#22C55E',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 20,
+  },
+  successCheckmark: {
+    color: '#fff',
+    fontSize: 56,
+    fontWeight: '800',
+    marginTop: -2,
+  },
+  successText: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: '700',
+    marginTop: 20,
+  },
+
+  // ── Professor detection badge ──
+  professorBadge: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 60 : 36,
+    left: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    maxWidth: SCREEN_WIDTH * 0.55,
+  },
+  professorIcon: {
+    fontSize: 28,
+    marginRight: 10,
+  },
+  professorInfo: {
+    flexShrink: 1,
+  },
+  professorName: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  professorDept: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 1,
+  },
+  professorConfidence: {
+    color: '#22C55E',
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 2,
   },
 
   // ── Emotion results overlay ──
