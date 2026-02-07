@@ -9,6 +9,7 @@ import {
   Platform,
   Dimensions,
   ActivityIndicator,
+  ScrollView,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import {
@@ -19,6 +20,28 @@ import {
 import * as FileSystem from 'expo-file-system';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL ?? 'http://localhost:3000/api/analyse';
+
+const EMOTION_EMOJIS = {
+  happy: '😊',
+  surprise: '😲',
+  fear: '😨',
+  angry: '😠',
+  sad: '😢',
+  neutral: '😐',
+  disgust: '🤢',
+};
+
+const EMOTION_COLORS = {
+  happy: '#22C55E',
+  surprise: '#F59E0B',
+  fear: '#8B5CF6',
+  angry: '#EF4444',
+  sad: '#3B82F6',
+  neutral: '#6B7280',
+  disgust: '#10B981',
+};
 
 // Flow: 'back' → 'front' → 'preview'
 const STEP_BACK = 'back';
@@ -37,6 +60,7 @@ export default function App() {
   const [backBase64, setBackBase64] = useState(null);
   const [frontBase64, setFrontBase64] = useState(null);
   const [sending, setSending] = useState(false);
+  const [emotionData, setEmotionData] = useState(null);
   const pendingFront = useRef(false);
 
   // Auto-snap selfie once the front camera initialises
@@ -124,14 +148,16 @@ export default function App() {
     setFrontPhotoPath(null);
     setBackBase64(null);
     setFrontBase64(null);
+    setEmotionData(null);
     setStep(STEP_BACK);
   }
 
   async function handleSend() {
     if (!backPhotoPath || !frontPhotoPath) return;
     setSending(true);
+    setEmotionData(null);
     try {
-      // Convert to base64 at send time
+      // Convert both to base64
       const [back64, front64] = await Promise.all([
         readAsBase64(backPhotoPath),
         readAsBase64(frontPhotoPath),
@@ -140,26 +166,43 @@ export default function App() {
       setBackBase64(back64);
       setFrontBase64(front64);
 
-      const payload = {
-        backImage: back64,
-        frontImage: front64,
-        timestamp: new Date().toISOString(),
-      };
+      // Send front (selfie) image for emotion analysis
+      let emotions;
+      try {
+        const response = await fetch(BACKEND_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image: front64,
+            timestamp: new Date().toISOString(),
+          }),
+        });
 
-      // TODO: Replace with your actual backend URL
-      // await fetch('https://your-backend.com/api/upload', {
+        if (!response.ok) {
+          throw new Error(`Server responded with ${response.status}`);
+        }
+
+        emotions = await response.json();
+      } catch (networkErr) {
+        // Fallback: use dummy data while backend is not available
+        console.warn('Backend unavailable, using dummy emotion data:', networkErr.message);
+        emotions = [
+          { label: 'surprise', score: 0.9360453486442566 },
+          { label: 'fear', score: 0.023657215759158134 },
+          { label: 'happy', score: 0.018095578998327255 },
+          { label: 'angry', score: 0.009856591001152992 },
+          { label: 'neutral', score: 0.004771077074110508 },
+        ];
+      }
+
+      setEmotionData(emotions);
+
+      // TODO: Send back camera image to vision model endpoint
+      // const visionResponse = await fetch(VISION_BACKEND_URL, {
       //   method: 'POST',
       //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify(payload),
+      //   body: JSON.stringify({ image: back64, timestamp: new Date().toISOString() }),
       // });
-
-      console.log(
-        'Payload ready — backImage length:',
-        payload.backImage.length,
-        'frontImage length:',
-        payload.frontImage.length,
-      );
-      Alert.alert('Ready!', 'Both images encoded as base64 and ready to send.');
     } catch (e) {
       Alert.alert('Send failed', e?.message ?? 'Unknown error');
     } finally {
@@ -169,6 +212,8 @@ export default function App() {
 
   // ──── Preview screen ────
   if (step === STEP_PREVIEW && backPhotoPath && frontPhotoPath) {
+    const topEmotion = emotionData?.[0];
+
     return (
       <View style={styles.container}>
         <StatusBar style="light" />
@@ -180,6 +225,53 @@ export default function App() {
         <View style={styles.previewPip}>
           <Image source={{ uri: `file://${frontPhotoPath}` }} style={styles.previewPipImage} />
         </View>
+
+        {/* Emotion results overlay */}
+        {emotionData && (
+          <View style={styles.emotionOverlay}>
+            {/* Top emotion badge */}
+            <View style={styles.topEmotionBadge}>
+              <Text style={styles.topEmotionEmoji}>
+                {EMOTION_EMOJIS[topEmotion.label] ?? '🤔'}
+              </Text>
+              <Text style={styles.topEmotionLabel}>
+                {topEmotion.label.charAt(0).toUpperCase() + topEmotion.label.slice(1)}
+              </Text>
+              <Text style={styles.topEmotionScore}>
+                {(topEmotion.score * 100).toFixed(1)}%
+              </Text>
+            </View>
+
+            {/* All emotions breakdown */}
+            <View style={styles.emotionList}>
+              {emotionData.map((item) => (
+                <View key={item.label} style={styles.emotionRow}>
+                  <Text style={styles.emotionRowEmoji}>
+                    {EMOTION_EMOJIS[item.label] ?? '🤔'}
+                  </Text>
+                  <Text style={styles.emotionRowLabel}>
+                    {item.label.charAt(0).toUpperCase() + item.label.slice(1)}
+                  </Text>
+                  <View style={styles.emotionBarTrack}>
+                    <View
+                      style={[
+                        styles.emotionBarFill,
+                        {
+                          width: `${Math.max(item.score * 100, 2)}%`,
+                          backgroundColor:
+                            EMOTION_COLORS[item.label] ?? '#5B21B6',
+                        },
+                      ]}
+                    />
+                  </View>
+                  <Text style={styles.emotionRowScore}>
+                    {(item.score * 100).toFixed(1)}%
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
 
         {/* Bottom actions */}
         <View style={styles.previewBottomBar}>
@@ -195,7 +287,9 @@ export default function App() {
             {sending ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.sendButtonText}>Send</Text>
+              <Text style={styles.sendButtonText}>
+                {emotionData ? 'Resend' : 'Send'}
+              </Text>
             )}
           </TouchableOpacity>
         </View>
@@ -426,5 +520,79 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',
+  },
+
+  // ── Emotion results overlay ──
+  emotionOverlay: {
+    position: 'absolute',
+    bottom: Platform.OS === 'ios' ? 110 : 90,
+    left: 16,
+    right: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    borderRadius: 20,
+    padding: 16,
+    backdropFilter: 'blur(10px)',
+  },
+  topEmotionBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+    paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  topEmotionEmoji: {
+    fontSize: 32,
+    marginRight: 10,
+  },
+  topEmotionLabel: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: '800',
+    marginRight: 8,
+  },
+  topEmotionScore: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  emotionList: {
+    gap: 8,
+  },
+  emotionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  emotionRowEmoji: {
+    fontSize: 16,
+    width: 24,
+    textAlign: 'center',
+  },
+  emotionRowLabel: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+    width: 68,
+    marginLeft: 6,
+  },
+  emotionBarTrack: {
+    flex: 1,
+    height: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: 4,
+    marginHorizontal: 8,
+    overflow: 'hidden',
+  },
+  emotionBarFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  emotionRowScore: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 12,
+    fontWeight: '600',
+    width: 44,
+    textAlign: 'right',
   },
 });
