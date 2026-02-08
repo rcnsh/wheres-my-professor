@@ -1297,6 +1297,10 @@ function LecturerProfileScreen() {
 const Tab = createBottomTabNavigator();
 
 function MainNavigator() {
+  const { user } = useUser();
+  const username = user?.username || '';
+  const isAdmin = username.toLowerCase().endsWith('admin');
+
   return (
     <NavigationContainer>
       <Tab.Navigator
@@ -1326,8 +1330,8 @@ function MainNavigator() {
         })}
       >
         <Tab.Screen name="Camera" component={CameraScreen} />
-        <Tab.Screen name="Student" component={StudentProfileScreen} />
-        <Tab.Screen name="Lecturer" component={LecturerProfileScreen} />
+        {!isAdmin && <Tab.Screen name="Student" component={StudentProfileScreen} />}
+        {isAdmin && <Tab.Screen name="Lecturer" component={LecturerProfileScreen} />}
         <Tab.Screen name="Account" component={AccountScreen} />
       </Tab.Navigator>
     </NavigationContainer>
