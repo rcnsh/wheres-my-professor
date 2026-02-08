@@ -1,6 +1,4 @@
 {
-  "buildCommand": "npm install",
-  "outputDirectory": ".vercel/output",
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api" }
   ]
