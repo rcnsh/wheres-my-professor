@@ -6,8 +6,8 @@ export interface Env {
   HF_EMOTION_URL: string;
   HF_API_KEY: string;
 
-  // ── Gemini ──
-  GEMINI_API_KEY: string;
+  // ── OpenRouter ──
+  OPENROUTER_API_KEY: string;
 
   // ── MongoDB ──
   MONGODB_URI: string;

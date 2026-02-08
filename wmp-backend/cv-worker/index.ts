@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { OpenRouter } from "@openrouter/sdk";
 import { type Env, searchByBase64, listPeople, getStats } from "./client";
 import { getDatabase } from "./mongo";
 import { attendanceRoute } from "./routes/attendance";
@@ -92,36 +93,29 @@ app.post("/emotion-score", async (c) => {
       .map((e: any) => `${e.label}: ${(e.score * 100).toFixed(1)}%`)
       .join(", ");
 
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${c.env.GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: `Given the following facial emotion analysis results: ${emotionSummary}. Rate the overall emotion on a scale from 0 to 100, where 100 is the happiest and 0 is the saddest. Respond with ONLY a single integer number, nothing else.`,
-                },
-              ],
-            },
-          ],
-        }),
-      }
-    );
+    const openRouter = new OpenRouter({
+      apiKey: c.env.OPENROUTER_API_KEY,
+    });
 
-    if (!geminiRes.ok) {
-      const errText = await geminiRes.text().catch(() => "");
-      throw new Error(`Gemini API responded with ${geminiRes.status}: ${errText}`);
-    }
+    const completion = await openRouter.chat.send({
+      chatGenerationParams: {
+        model: "google/gemini-3-flash-preview",
+        messages: [
+          {
+            role: "user",
+            content: `Given the following facial emotion analysis results: ${emotionSummary}. Rate the overall emotion on a scale from 0 to 100, where 100 is the happiest and 0 is the saddest. Respond with ONLY a single integer number, nothing else.`,
+          },
+        ],
+        stream: false,
+      },
+    });
 
-    const data: any = await geminiRes.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? "";
+    const raw = (completion as any).choices?.[0]?.message?.content ?? "";
+    const text = typeof raw === "string" ? raw.trim() : "";
     const score = parseInt(text, 10);
 
     if (isNaN(score) || score < 0 || score > 100) {
-      return c.json({ error: "Gemini returned unexpected value", raw: text }, 502);
+      return c.json({ error: "LLM returned unexpected value", raw: text }, 502);
     }
 
     return c.json({ score });

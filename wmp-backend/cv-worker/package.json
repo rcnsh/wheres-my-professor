@@ -6,6 +6,7 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
+    "@openrouter/sdk": "^0.8.0",
     "hono": "^4",
     "mongodb": "^6",
     "zod": "^3"
