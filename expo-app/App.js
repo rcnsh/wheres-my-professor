@@ -19,6 +19,8 @@ import {
   useCameraPermission,
 } from 'react-native-vision-camera';
 import * as FileSystem from 'expo-file-system';
+import * as Location from 'expo-location';
+import { getDistance } from 'geolib';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
@@ -49,6 +51,13 @@ const EMOTION_COLORS = {
   disgust: '#10B981',
 };
 
+// Target coordinates the user must be within 50m of to save
+const TARGET_LOCATION = {
+  latitude: 53.808929,
+  longitude: -1.553888,
+};
+const MAX_DISTANCE_METRES = 50;
+
 // Flow: 'back' → 'front' → 'preview'
 const STEP_BACK = 'back';
 const STEP_FRONT = 'front';
@@ -70,8 +79,11 @@ function CameraScreen() {
   const [professorData, setProfessorData] = useState(null);
   const [saving, setSaving] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [showFailure, setShowFailure] = useState(false);
   const successScale = useRef(new Animated.Value(0)).current;
   const successOpacity = useRef(new Animated.Value(0)).current;
+  const failureScale = useRef(new Animated.Value(0)).current;
+  const failureOpacity = useRef(new Animated.Value(0)).current;
   const pendingFront = useRef(false);
 
   // Auto-snap selfie once the front camera initialises
@@ -251,16 +263,74 @@ function CameraScreen() {
     setProfessorData(null);
     setSaving(false);
     setShowSuccess(false);
+    setShowFailure(false);
     successScale.setValue(0);
     successOpacity.setValue(0);
+    failureScale.setValue(0);
+    failureOpacity.setValue(0);
     setStep(STEP_BACK);
+  }
+
+  function showFailureAnimation() {
+    setShowFailure(true);
+    Animated.parallel([
+      Animated.spring(failureScale, {
+        toValue: 1,
+        friction: 4,
+        tension: 60,
+        useNativeDriver: true,
+      }),
+      Animated.timing(failureOpacity, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setTimeout(() => {
+        Animated.timing(failureOpacity, {
+          toValue: 0,
+          duration: 400,
+          useNativeDriver: true,
+        }).start(() => {
+          setShowFailure(false);
+          failureScale.setValue(0);
+          failureOpacity.setValue(0);
+          setSaving(false);
+        });
+      }, 1800);
+    });
   }
 
   async function handleSave() {
     if (!emotionData || !professorData) return;
     setSaving(true);
     try {
-      // Collect top 2 emotions
+      // 1. Get current location
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Location required', 'Please enable location services to save your attendance.');
+        setSaving(false);
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+
+      // 2. Check distance from target
+      const distance = getDistance(
+        { latitude: location.coords.latitude, longitude: location.coords.longitude },
+        TARGET_LOCATION,
+      );
+
+      if (distance > MAX_DISTANCE_METRES) {
+        // Too far away — show red cross
+        console.log(`Too far from target: ${distance}m (max ${MAX_DISTANCE_METRES}m)`);
+        showFailureAnimation();
+        return;
+      }
+
+      // 3. Within range — proceed with save
       const topEmotions = emotionData.slice(0, 2).map((e) => ({
         label: e.label,
         score: e.score,
@@ -275,6 +345,11 @@ function CameraScreen() {
         images: {
           front: frontBase64,
           back: backBase64,
+        },
+        location: {
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+          distanceFromTarget: distance,
         },
         timestamp: new Date().toISOString(),
       };
@@ -292,6 +367,7 @@ function CameraScreen() {
         console.log('Record to save:', JSON.stringify({
           emotions: record.emotions,
           professor: record.professor,
+          location: record.location,
           timestamp: record.timestamp,
           frontImageLength: record.images.front?.length,
           backImageLength: record.images.back?.length,
@@ -457,6 +533,28 @@ function CameraScreen() {
             </Animated.View>
             <Animated.Text style={[styles.successText, { opacity: successOpacity }]}>
               Saved!
+            </Animated.Text>
+          </Animated.View>
+        )}
+
+        {/* Failure (too far) overlay */}
+        {showFailure && (
+          <Animated.View
+            style={[
+              styles.successOverlay,
+              { opacity: failureOpacity },
+            ]}
+          >
+            <Animated.View
+              style={[
+                styles.failureCircle,
+                { transform: [{ scale: failureScale }] },
+              ]}
+            >
+              <Text style={styles.failureCross}>✕</Text>
+            </Animated.View>
+            <Animated.Text style={[styles.failureText, { opacity: failureOpacity }]}>
+              Too far from lecture
             </Animated.Text>
           </Animated.View>
         )}
@@ -1292,6 +1390,33 @@ const styles = StyleSheet.create({
   successText: {
     color: '#fff',
     fontSize: 24,
+    fontWeight: '700',
+    marginTop: 20,
+  },
+
+  // ── Failure overlay ──
+  failureCircle: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#EF4444',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 20,
+  },
+  failureCross: {
+    color: '#fff',
+    fontSize: 56,
+    fontWeight: '800',
+    marginTop: -2,
+  },
+  failureText: {
+    color: '#fff',
+    fontSize: 20,
     fontWeight: '700',
     marginTop: 20,
   },
