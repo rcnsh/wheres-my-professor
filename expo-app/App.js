@@ -380,6 +380,7 @@ function CameraScreen() {
   const [saving, setSaving] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [showFailure, setShowFailure] = useState(false);
+  const [failureReason, setFailureReason] = useState('');
   const successScale = useRef(new Animated.Value(0)).current;
   const successOpacity = useRef(new Animated.Value(0)).current;
   const failureScale = useRef(new Animated.Value(0)).current;
@@ -606,7 +607,8 @@ function CameraScreen() {
     setStep(STEP_BACK);
   }
 
-  function showFailureAnimation() {
+  function showFailureAnimation(reason = 'Something went wrong') {
+    setFailureReason(reason);
     setShowFailure(true);
     Animated.parallel([
       Animated.spring(failureScale, {
@@ -639,6 +641,13 @@ function CameraScreen() {
   async function handleSave() {
     if (!emotionData || !professorData) return;
     setSaving(true);
+
+    // Check if a professor was actually detected
+    if (!professorData.name || professorData.name === 'Unknown Professor' || professorData.confidence <= 0) {
+      showFailureAnimation('No professor detected');
+      return;
+    }
+
     try {
       // 1. Get current location
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -661,7 +670,7 @@ function CameraScreen() {
       if (distance > MAX_DISTANCE_METRES) {
         // Too far away — show red cross
         console.log(`Too far from target: ${distance}m (max ${MAX_DISTANCE_METRES}m)`);
-        showFailureAnimation();
+        showFailureAnimation('Too far from lecture');
         return;
       }
 
@@ -683,7 +692,7 @@ function CameraScreen() {
       } catch (err) {
         console.warn('Attendance save failed:', err.message);
         console.log('Attendance record:', JSON.stringify(attendanceRecord));
-        showFailureAnimation();
+        showFailureAnimation('Failed to save attendance');
         return;
       }
 
@@ -867,7 +876,7 @@ function CameraScreen() {
               <Text style={styles.failureCross}>✕</Text>
             </Animated.View>
             <Animated.Text style={[styles.failureText, { opacity: failureOpacity }]}>
-              Too far from lecture
+              {failureReason}
             </Animated.Text>
           </Animated.View>
         )}
