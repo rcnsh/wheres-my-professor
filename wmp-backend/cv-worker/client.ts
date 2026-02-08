@@ -1,11 +1,16 @@
 /**
- * TypeScript Face Recognition Client
- * Queries Weaviate directly for face search
+ * Face Recognition Client for Cloudflare Workers
+ * Uses Weaviate GraphQL REST API via fetch (no Node.js dependencies)
  */
 
-import weaviate, { WeaviateClient, ApiKey } from 'weaviate-client';
+// --- Types ---
 
-// Types
+export interface Env {
+  WEAVIATE_CLUSTER_URL: string;
+  WEAVIATE_API_KEY: string;
+  PYTHON_EMBEDDING_URL: string;
+}
+
 export interface FaceMatch {
   personName: string;
   confidence: number;
@@ -20,254 +25,171 @@ export interface SearchResult {
   facesDetected: number;
 }
 
-/**
- * Face Recognition Client
- */
-export class FaceRecognitionClient {
-  private weaviateClient: WeaviateClient;
-  private embeddingServiceUrl: string;
-  private collectionName = 'FaceEmbedding';
+// --- Weaviate helpers ---
 
-  private constructor(client: WeaviateClient, embeddingServiceUrl: string) {
-    this.weaviateClient = client;
-    this.embeddingServiceUrl = embeddingServiceUrl;
+async function graphql(env: Env, query: string): Promise<any> {
+  const url = env.WEAVIATE_CLUSTER_URL.startsWith("http")
+    ? env.WEAVIATE_CLUSTER_URL
+    : `https://${env.WEAVIATE_CLUSTER_URL}`;
+
+  const res = await fetch(`${url}/v1/graphql`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${env.WEAVIATE_API_KEY}`,
+    },
+    body: JSON.stringify({ query }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Weaviate ${res.status}: ${await res.text()}`);
   }
 
-  static async create(
-    embeddingServiceUrl: string = process.env.PYTHON_EMBEDDING_URL || "localhost:8000"
-  ): Promise<FaceRecognitionClient> {
-    const clusterUrl = process.env.WEAVIATE_CLUSTER_URL;
-    const apiKey = process.env.WEAVIATE_API_KEY;
+  const json: any = await res.json();
+  if (json.errors?.length) {
+    throw new Error(`Weaviate GraphQL: ${json.errors[0].message}`);
+  }
+  return json.data;
+}
 
-    if (!clusterUrl || !apiKey) {
-      throw new Error('WEAVIATE_CLUSTER_URL and WEAVIATE_API_KEY environment variables must be set');
-    }
+// --- Embedding extraction ---
 
-    const client = await weaviate.connectToWeaviateCloud(clusterUrl, {
-      authCredentials: new ApiKey(apiKey),
-      skipInitChecks: true,
-    });
+async function extractEmbedding(env: Env, imageBlob: Blob): Promise<number[]> {
+  const form = new FormData();
+  form.append("image", imageBlob, "image.jpg");
 
-    return new FaceRecognitionClient(client, embeddingServiceUrl);
+  const res = await fetch(`${env.PYTHON_EMBEDDING_URL}/extract-embedding`, {
+    method: "POST",
+    body: form,
+  });
+
+  if (!res.ok) {
+    const err: any = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to extract embedding");
   }
 
-  /**
-   * Extract embedding from image using Python service
-   */
-  private async extractEmbedding(imageFile: File | Buffer): Promise<number[]> {
-    const formData = new FormData();
-    
-    if (imageFile instanceof Buffer) {
-      // Node.js — convert Buffer to Uint8Array to satisfy BlobPart
-      const blob = new Blob([new Uint8Array(imageFile)]);
-      formData.append('image', blob, 'image.jpg');
-    } else {
-      // Browser
-      formData.append('image', imageFile as File);
-    }
+  const data: any = await res.json();
+  return data.embedding;
+}
 
-    const response = await fetch(`${this.embeddingServiceUrl}/extract-embedding`, {
-      method: 'POST',
-      body: formData,
-    });
+// --- Public API ---
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || 'Failed to extract embedding');
-    }
+export async function searchByBase64(
+  env: Env,
+  base64Image: string,
+  options: { topK?: number; threshold?: number } = {}
+): Promise<SearchResult> {
+  const startTime = Date.now();
+  const { topK = 5, threshold } = options;
 
-    const data = await response.json();
-    return data.embedding;
-  }
+  try {
+    // Decode base64 → Blob (Workers-safe, no Buffer)
+    const binary = atob(base64Image);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const blob = new Blob([bytes], { type: "image/jpeg" });
 
-  /**
-   * Search for a face by file
-   */
-  async searchByFile(
-    imageFile: File | Buffer,
-    options: {
-      topK?: number;
-      threshold?: number;
-    } = {}
-  ): Promise<SearchResult> {
-    const startTime = Date.now();
-    const { topK = 5, threshold } = options;
+    // Extract embedding via Python service
+    const embedding = await extractEmbedding(env, blob);
 
-    try {
-      // Step 1: Extract embedding using Python service
-      const embedding = await this.extractEmbedding(imageFile);
-
-      // Step 2: Query Weaviate directly
-      const collection = this.weaviateClient.collections.get(this.collectionName);
-      
-      const result = await collection.query.nearVector(embedding, {
-        limit: topK * 10, // Get extra to group by person
-        returnMetadata: ['distance']
-      });
-
-      // Step 3: Process results - group by personName
-      const personMatches = new Map<string, FaceMatch>();
-
-      for (const item of result.objects) {
-        const personName = item.properties.personName as string;
-        const distance = item.metadata?.distance || 1.0;
-
-        // Apply threshold
-        if (threshold !== undefined && distance > threshold) {
-          continue;
+    // Query Weaviate nearVector
+    const vectorStr = `[${embedding.join(",")}]`;
+    const data = await graphql(
+      env,
+      `{
+        Get {
+          FaceEmbedding(
+            nearVector: { vector: ${vectorStr} }
+            limit: ${topK * 10}
+          ) {
+            personName
+            _additional { distance }
+          }
         }
-
-        // Keep best match per person
-        if (!personMatches.has(personName) || distance < personMatches.get(personName)!.distance) {
-          personMatches.set(personName, {
-            personName,
-            distance,
-            confidence: (1 - distance) * 100,
-          });
-        }
-      }
-
-      // Sort by distance and take topK
-      const allMatches = Array.from(personMatches.values())
-        .sort((a, b) => a.distance - b.distance)
-        .slice(0, topK);
-
-      const searchTimeMs = Date.now() - startTime;
-
-      return {
-        found: allMatches.length > 0,
-        topMatch: allMatches[0] || null,
-        allMatches,
-        searchTimeMs,
-        facesDetected: 1,
-      };
-
-    } catch (error) {
-      const searchTimeMs = Date.now() - startTime;
-      
-      if (error instanceof Error && error.message.includes('No face detected')) {
-        return {
-          found: false,
-          topMatch: null,
-          allMatches: [],
-          searchTimeMs,
-          facesDetected: 0,
-        };
-      }
-      
-      throw error;
-    }
-  }
-
-  /**
-   * Search by image path (Node.js only)
-   */
-  async searchByPath(
-    imagePath: string,
-    options: {
-      topK?: number;
-      threshold?: number;
-    } = {}
-  ): Promise<SearchResult> {
-    if (typeof window !== 'undefined') {
-      throw new Error('searchByPath is only available in Node.js');
-    }
-
-    const fs = await import('fs');
-    const imageBuffer = fs.readFileSync(imagePath);
-
-    return this.searchByFile(imageBuffer, options);
-  }
-
-  /**
-   * Get embeddings for a person by name
-   */
-  async getPersonByName(personName: string): Promise<FaceMatch[]> {
-    const collection = this.weaviateClient.collections.get(this.collectionName);
-    
-    const result = await collection.query.fetchObjects({
-      filters: collection.filter.byProperty('personName').equal(personName),
-      limit: 100
-    });
-
-    return result.objects.map(() => ({
-      personName,
-      distance: 0,
-      confidence: 100,
-    }));
-  }
-
-  /**
-   * Search by base64 image
-   */
-
-  async searchByBase64(
-    base64Image: string,
-    options: {
-      topK?: number;
-      threshold?: number;
-    } = {}
-  ): Promise<SearchResult> {
-    const imageBuffer = Buffer.from(base64Image, 'base64');
-    return this.searchByFile(imageBuffer, options);
-  }
-
-
-  /**
-   * List all registered people (unique names)
-   */
-  async listPeople(limit: number = 100): Promise<Array<{
-    personName: string;
-    photoCount: number;
-  }>> {
-    const collection = this.weaviateClient.collections.get(this.collectionName);
-    
-    const result = await collection.query.fetchObjects({
-      limit: 1000
-    });
-
-    // Group by personName
-    const peopleMap = new Map<string, number>();
-    
-    for (const item of result.objects) {
-      const personName = item.properties.personName as string;
-      peopleMap.set(personName, (peopleMap.get(personName) || 0) + 1);
-    }
-
-    return Array.from(peopleMap.entries())
-      .map(([personName, photoCount]) => ({ personName, photoCount }))
-      .slice(0, limit);
-  }
-
-  /**
-   * Get database statistics
-   */
-  async getStats(): Promise<{
-    totalEmbeddings: number;
-    totalPeople: number;
-  }> {
-    const collection = this.weaviateClient.collections.get(this.collectionName);
-    
-    const aggregate = await collection.aggregate.overAll();
-
-    const people = await this.listPeople(10000);
-
-    return {
-      totalEmbeddings: aggregate.totalCount,
-      totalPeople: people.length
-    };
-  }
-
-  /**
-   * Delete a person from database by name
-   */
-  async deletePerson(personName: string): Promise<number> {
-    const collection = this.weaviateClient.collections.get(this.collectionName);
-    
-    const result = await collection.data.deleteMany(
-      collection.filter.byProperty('personName').equal(personName)
+      }`
     );
 
-    return result.successful;
+    const objects: any[] = data?.Get?.FaceEmbedding ?? [];
+
+    // Group by person — keep best (lowest distance) match per person
+    const personMatches = new Map<string, FaceMatch>();
+
+    for (const item of objects) {
+      const personName: string = item.personName;
+      const distance: number = item._additional?.distance ?? 1.0;
+
+      if (threshold !== undefined && distance > threshold) continue;
+
+      if (
+        !personMatches.has(personName) ||
+        distance < personMatches.get(personName)!.distance
+      ) {
+        personMatches.set(personName, {
+          personName,
+          distance,
+          confidence: (1 - distance) * 100,
+        });
+      }
+    }
+
+    const allMatches = Array.from(personMatches.values())
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, topK);
+
+    return {
+      found: allMatches.length > 0,
+      topMatch: allMatches[0] ?? null,
+      allMatches,
+      searchTimeMs: Date.now() - startTime,
+      facesDetected: 1,
+    };
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("No face detected")) {
+      return {
+        found: false,
+        topMatch: null,
+        allMatches: [],
+        searchTimeMs: Date.now() - startTime,
+        facesDetected: 0,
+      };
+    }
+    throw error;
   }
+}
+
+export async function listPeople(
+  env: Env,
+  limit = 100
+): Promise<Array<{ personName: string; photoCount: number }>> {
+  const data = await graphql(
+    env,
+    `{ Get { FaceEmbedding(limit: 1000) { personName } } }`
+  );
+
+  const objects: any[] = data?.Get?.FaceEmbedding ?? [];
+  const peopleMap = new Map<string, number>();
+
+  for (const item of objects) {
+    const name: string = item.personName;
+    peopleMap.set(name, (peopleMap.get(name) ?? 0) + 1);
+  }
+
+  return Array.from(peopleMap.entries())
+    .map(([personName, photoCount]) => ({ personName, photoCount }))
+    .slice(0, limit);
+}
+
+export async function getStats(
+  env: Env
+): Promise<{ totalEmbeddings: number; totalPeople: number }> {
+  const data = await graphql(
+    env,
+    `{ Aggregate { FaceEmbedding { meta { count } } } }`
+  );
+
+  const totalEmbeddings: number =
+    data?.Aggregate?.FaceEmbedding?.[0]?.meta?.count ?? 0;
+  const people = await listPeople(env, 10000);
+
+  return { totalEmbeddings, totalPeople: people.length };
 }

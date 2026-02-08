@@ -1,14 +1,15 @@
 {
-	"name": "cv-worker",
-	"scripts": {
-		"dev": "tsx watch index.ts",
-		"start": "tsx index.ts"
-	},
-	"dependencies": {
-		"@hono/node-server": "^1.19.9",
-		"dotenv": "^16",
-		"hono": "^4.11.8",
-		"tsx": "^4.21.0",
-		"weaviate-client": "^3.11.0"
-	}
+  "name": "cv-worker",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "hono": "^4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4",
+    "wrangler": "^4"
+  }
 }
