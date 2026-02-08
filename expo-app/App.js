@@ -71,7 +71,7 @@ const TARGET_LOCATION = {
   latitude: 53.808929,
   longitude: -1.553888,
 };
-const MAX_DISTANCE_METRES = 50;
+const MAX_DISTANCE_METRES = 150;
 
 // Flow: 'back' → 'front' → 'preview'
 const STEP_BACK = 'back';
@@ -668,7 +668,8 @@ function CameraScreen() {
       // 3. Within range — save attendance to MongoDB
       const attendanceRecord = {
         student_id: user?.username ?? '',
-        lecture_id: professorData.name,
+        lecturer_id: professorData.name,
+        lecture_id: 'CSC1031',
         emotion_score: emotionScore ?? 50,
         timestamp: new Date().toISOString(),
       };
@@ -1136,10 +1137,11 @@ function LecturerProfileScreen() {
     (async () => {
       setLoading(true);
       try {
+        const nameParam = user?.fullName ? `?name=${encodeURIComponent(user.fullName)}` : '';
         const [profileRes, heatmapRes, sessionRes] = await Promise.all([
-          fetch(`${MONGO_API_URL}/lecturer/${user?.username}/profile`),
-          fetch(`${MONGO_API_URL}/lecturer/${user?.username}/heatmap`),
-          fetch(`${MONGO_API_URL}/lecturer/${user?.username}/next-session`),
+          fetch(`${MONGO_API_URL}/lecturer/${user?.username}/profile${nameParam}`),
+          fetch(`${MONGO_API_URL}/lecturer/${user?.username}/heatmap${nameParam}`),
+          fetch(`${MONGO_API_URL}/lecturer/${user?.username}/next-session${nameParam}`),
         ]);
         if (profileRes.ok) {
           const data = await profileRes.json();
@@ -1192,11 +1194,12 @@ function LecturerProfileScreen() {
   const heatmapData = buildHeatmapGrid();
 
   function getHeatmapColor(score) {
-    if (score > 80) return '#A78BFA';
-    if (score > 60) return '#8B5CF6';
-    if (score > 40) return '#7C3AED';
-    if (score > 20) return '#6D28D9';
-    return 'rgba(255,255,255,0.05)';
+    if (score <= 0) return 'rgba(255,255,255,0.05)';
+    if (score > 80) return '#DDD6FE'; // Lightest — highest avg emotion
+    if (score > 60) return '#C4B5FD';
+    if (score > 40) return '#A78BFA';
+    if (score > 20) return '#8B5CF6';
+    return '#6D28D9';               // Darkest — lowest avg emotion
   }
 
   function formatSessionTime(datetime) {

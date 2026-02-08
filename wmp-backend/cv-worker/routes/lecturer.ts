@@ -111,6 +111,7 @@ lecturerRoute.delete("/:lecturerId", async (c) => {
 // Returns lecturer info + aggregated stats
 lecturerRoute.get("/:lecturerId/profile", async (c) => {
   const lecturerId = c.req.param("lecturerId");
+  const nameParam = c.req.query('name');
   const db = await getDatabase(c.env);
 
   const lecturerCol = db.collection("Lecturer");
@@ -119,9 +120,7 @@ lecturerRoute.get("/:lecturerId/profile", async (c) => {
   const studentCol = db.collection("Student");
 
   const lecturer = await lecturerCol.findOne({ lecturer_id: lecturerId });
-  if (!lecturer) {
-    return c.json({ error: "Lecturer not found" }, 404);
-  }
+  const lecturerName = lecturer?.fullname ?? nameParam ?? lecturerId;
 
   const lectures = await lectureCol
     .find({ lecturer_id: lecturerId })
@@ -130,15 +129,23 @@ lecturerRoute.get("/:lecturerId/profile", async (c) => {
   const totalLectures = lectures.length;
 
   const attendanceRecords = await attendanceCol
-    .find({ lecture_id: { $in: lectureIds } })
+    .find({
+      $or: [
+        { lecture_id: { $in: lectureIds } },
+        { lecture_id: lecturerName },
+        { lecture_id: lecturerId },
+        { lecturer_id: lecturerName },
+        { lecturer_id: lecturerId },
+      ],
+    })
     .toArray();
 
   const totalStudents = await studentCol.countDocuments({});
 
-  const expectedAttendance = totalLectures * totalStudents;
+  const totalAttendableSlots = Math.max(totalLectures * totalStudents, attendanceRecords.length);
   const attendanceRate =
-    expectedAttendance > 0
-      ? Math.round((attendanceRecords.length / expectedAttendance) * 100)
+    totalAttendableSlots > 0
+      ? Math.round((attendanceRecords.length / totalAttendableSlots) * 100)
       : 0;
 
   const avgEngagement =
@@ -158,13 +165,13 @@ lecturerRoute.get("/:lecturerId/profile", async (c) => {
 
   return c.json({
     lecturer: {
-      id: lecturer.lecturer_id,
-      fullname: lecturer.fullname,
+      id: lecturerId,
+      fullname: lecturerName,
     },
     stats: {
       avgEngagement,
       attendanceRate,
-      totalLectures,
+      totalLectures: Math.max(totalLectures, 1),
       activeStudents,
     },
   });
@@ -178,24 +185,50 @@ lecturerRoute.get("/:lecturerId/heatmap", async (c) => {
 
   const lectureCol = db.collection("Lecture");
   const attendanceCol = db.collection("Attendance");
+  const lecturerCol = db.collection("Lecturer");
 
+  // Resolve lecturer name for matching against lecture_id in Attendance
+  const nameParam = c.req.query('name');
+  const lecturer = await lecturerCol.findOne({ lecturer_id: lecturerId });
+  const lecturerName = lecturer?.fullname ?? nameParam ?? lecturerId;
+
+  // Get lecture_ids from the Lecture collection for this lecturer
   const lectures = await lectureCol
     .find({ lecturer_id: lecturerId })
     .toArray();
   const lectureIds = lectures.map((l) => l.lecture_id);
+
+  // Query attendance matching Lecture.lecture_id, lecturer name, or lecturer_id field
+  const attendanceRecords = await attendanceCol
+    .find({
+      $or: [
+        { lecture_id: { $in: lectureIds } },
+        { lecture_id: lecturerName },
+        { lecture_id: lecturerId },
+        { lecturer_id: lecturerName },
+        { lecturer_id: lecturerId },
+      ],
+    })
+    .toArray();
+
+  // Build lecture datetime lookup
   const lectureMap = Object.fromEntries(
     lectures.map((l) => [l.lecture_id, l])
   );
 
-  const attendanceRecords = await attendanceCol
-    .find({ lecture_id: { $in: lectureIds } })
-    .toArray();
-
   const dayMap: Record<string, { total: number; count: number }> = {};
   for (const record of attendanceRecords) {
-    const lecture = lectureMap[record.lecture_id];
-    if (!lecture?.datetime) continue;
-    const dateKey = new Date(lecture.datetime).toISOString().slice(0, 10);
+    // Prefer the attendance record's own timestamp, fall back to lecture datetime
+    let dateKey: string | null = null;
+    if (record.timestamp) {
+      dateKey = new Date(record.timestamp).toISOString().slice(0, 10);
+    } else {
+      const lecture = lectureMap[record.lecture_id];
+      if (lecture?.datetime) {
+        dateKey = new Date(lecture.datetime).toISOString().slice(0, 10);
+      }
+    }
+    if (!dateKey) continue;
     if (!dayMap[dateKey]) dayMap[dateKey] = { total: 0, count: 0 };
     dayMap[dateKey].total += record.emotion_score ?? 0;
     dayMap[dateKey].count += 1;
