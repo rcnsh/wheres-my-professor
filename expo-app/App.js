@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback } from 'react';
 import {
   StyleSheet,
   Text,
@@ -252,7 +252,129 @@ function CameraScreen() {
 }
 
 
-function ProfileScreen() {
+function StudentProfileScreen() {
+  const stats = {
+    attendance: 48, // Low attendance for demonstration
+    modules: 5,
+    rank: 'Top 10%',
+  };
+
+  const [selectedDay, setSelectedDay] = useState(0);
+  const weekDays = [
+    { day: 'Mon', date: '07' },
+    { day: 'Tue', date: '08' },
+    { day: 'Wed', date: '09' },
+    { day: 'Thu', date: '10' },
+    { day: 'Fri', date: '11' },
+    { day: 'Sat', date: '12' },
+    { day: 'Sun', date: '13' },
+  ];
+
+  const upcomingLessons = [
+    { id: '1', title: 'Cybersecurity', time: '9:00 AM', room: 'Hall B', instructor: 'Dr. Smith' },
+    { id: '2', title: 'Mobile Dev', time: '10:30 AM', room: 'Room 305', instructor: 'Dr. Brown' },
+    { id: '3', title: 'Data Structures', time: '1:00 PM', room: 'Lab 2A', instructor: 'Prof. Miller' },
+  ];
+
+  function getAttendanceBadge(attendance) {
+    if (attendance < 50) {
+      return {
+        bg: 'rgba(239, 68, 68, 0.15)',
+        color: '#EF4444',
+        text: 'Critical',
+        icon: 'warning'
+      };
+    }
+    if (attendance < 75) {
+      return {
+        bg: 'rgba(245, 158, 11, 0.15)',
+        color: '#F59E0B',
+        text: 'Caution',
+        icon: 'alert-circle'
+      };
+    }
+    return {
+      bg: 'rgba(52, 211, 153, 0.15)',
+      color: '#34D399',
+      text: '+2%',
+      icon: 'trending-up'
+    };
+  }
+
+  const badge = getAttendanceBadge(stats.attendance);
+
+  return (
+    <LinearGradient colors={['#2E1065', '#000000']} style={styles.profileContainer}>
+      <ScrollView contentContainerStyle={styles.profileContent} showsVerticalScrollIndicator={false}>
+        <View style={styles.profileHeader}>
+          <View style={styles.avatarPlaceholder}>
+            <Ionicons name="person" size={40} color="#DDD6FE" />
+          </View>
+          <Text style={styles.profileName}>Marcus Young</Text>
+          <Text style={styles.profileHandle}>Student ID: 2024-STU-01</Text>
+        </View>
+
+        <View style={styles.analyticsTitleRow}>
+          <Text style={styles.analyticsTitle}>Dashboard</Text>
+        </View>
+
+        <View style={styles.statsRow}>
+          <View style={styles.statCard}>
+            <Text style={styles.statValue}>{stats.attendance}%</Text>
+            <Text style={styles.statLabel}>Attendance</Text>
+            <View style={[styles.miniTrend, { backgroundColor: badge.bg }]}>
+              <Ionicons name={badge.icon} size={12} color={badge.color} />
+              <Text style={[styles.trendText, { color: badge.color }]}>{badge.text}</Text>
+            </View>
+          </View>
+          <View style={styles.statCard}>
+            <Text style={styles.statValue}>{stats.modules}</Text>
+            <Text style={styles.statLabel}>Modules</Text>
+            <View style={[styles.miniTrend, { backgroundColor: 'rgba(167, 139, 250, 0.1)' }]}>
+              <Text style={[styles.trendText, { color: '#A78BFA' }]}>Active</Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.timetableSection}>
+          <Text style={styles.sectionTitle}>Weekly Schedule</Text>
+          
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.calendarStrip}>
+            {weekDays.map((d, i) => (
+              <TouchableOpacity 
+                key={i} 
+                onPress={() => setSelectedDay(i)}
+                style={[styles.calendarDay, selectedDay === i && styles.selectedCalendarDay]}
+              >
+                <Text style={[styles.calendarDayLabel, selectedDay === i && styles.selectedCalendarText]}>{d.day}</Text>
+                <Text style={[styles.calendarDateLabel, selectedDay === i && styles.selectedCalendarText]}>{d.date}</Text>
+                {selectedDay === i && <View style={styles.calendarDot} />}
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          <Text style={styles.upcomingHeader}>Classes for Feb {weekDays[selectedDay].date}</Text>
+
+          {upcomingLessons.map(lesson => (
+            <TouchableOpacity key={lesson.id} style={styles.timetableCard}>
+              <View style={styles.lessonTimeBox}>
+                <Text style={styles.lessonTimeText}>{lesson.time}</Text>
+              </View>
+              <View style={styles.lessonInfo}>
+                <Text style={styles.lessonTitle}>{lesson.title}</Text>
+                <Text style={styles.lessonMetaText}>{lesson.room} • {lesson.instructor}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#A78BFA" />
+            </TouchableOpacity>
+          ))}
+        </View>
+      </ScrollView>
+    </LinearGradient>
+  );
+}
+
+
+function LecturerProfileScreen() {
   // Mock Data based on Lecture / Attendance Schema
   const stats = {
     avgEngagement: 82,
@@ -395,8 +517,10 @@ export default function App() {
             let iconName;
             if (route.name === 'Camera') {
               iconName = focused ? 'camera' : 'camera-outline';
-            } else if (route.name === 'Profile') {
+            } else if (route.name === 'Student') {
               iconName = focused ? 'person' : 'person-outline';
+            } else if (route.name === 'Lecturer') {
+              iconName = focused ? 'school' : 'school-outline';
             }
             return <Ionicons name={iconName} size={size} color={color} />;
           },
@@ -412,7 +536,8 @@ export default function App() {
         })}
       >
         <Tab.Screen name="Camera" component={CameraScreen} />
-        <Tab.Screen name="Profile" component={ProfileScreen} />
+        <Tab.Screen name="Student" component={StudentProfileScreen} />
+        <Tab.Screen name="Lecturer" component={LecturerProfileScreen} />
       </Tab.Navigator>
     </NavigationContainer>
   );
@@ -503,9 +628,9 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   trendText: {
-    fontSize: 12,
-    fontWeight: '700',
-    marginLeft: 4,
+    fontSize: 13,
+    fontWeight: '800',
+    marginLeft: 6,
   },
   heatmapCard: {
     backgroundColor: 'rgba(255, 255, 255, 0.04)',
@@ -566,6 +691,110 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     marginHorizontal: 2,
   },
+  // ── Student Profile Styles ──
+  timetableSection: {
+    marginTop: 10,
+    marginBottom: 40,
+  },
+  sectionTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 16,
+  },
+  timetableCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.1)',
+  },
+  lessonTimeBox: {
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    borderRadius: 12,
+    padding: 10,
+    width: 80,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lessonTimeText: {
+    color: '#DDD6FE',
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  lessonTimeHourText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  lessonTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  lessonMetaText: {
+    color: '#C4B5FD', // Lighter purple for better legibility
+    fontSize: 13,
+    marginTop: 4,
+    fontWeight: '500',
+  },
+  lessonInfo: {
+    flex: 1,
+    marginLeft: 16,
+  },
+  calendarStrip: {
+    flexDirection: 'row',
+    marginBottom: 20,
+  },
+  calendarDay: {
+    width: 60,
+    height: 75,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(167, 139, 250, 0.1)',
+  },
+  selectedCalendarDay: {
+    backgroundColor: '#8B5CF6',
+    borderColor: '#A78BFA',
+  },
+  calendarDayLabel: {
+    color: '#A78BFA',
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  calendarDateLabel: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '800',
+    marginTop: 2,
+  },
+  selectedCalendarText: {
+    color: '#fff',
+  },
+  calendarDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#fff',
+    marginTop: 4,
+  },
+  upcomingHeader: {
+    color: '#DDD6FE',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 12,
+    opacity: 0.8,
+  },
   sessionCard: {
     backgroundColor: 'rgba(139, 92, 246, 0.08)',
     borderRadius: 20,
@@ -589,7 +818,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   sessionMeta: {
-    color: '#A78BFA',
+    color: '#C4B5FD', // Lighter purple for better legibility
     fontSize: 14,
     marginTop: 4,
   },
