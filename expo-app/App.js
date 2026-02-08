@@ -44,7 +44,7 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const CLERK_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
 const EMOTION_ML_URL = process.env.EXPO_PUBLIC_EMOTION_ML_URL ?? 'https://wheresmyprofessor-api.rcn.sh/analyse';
-const MONGO_API_URL = process.env.EXPO_PUBLIC_MONGO_API_URL ?? 'https://reserveless-nonlixiviated-jamarion.ngrok-free.dev';
+const MONGO_API_URL = process.env.EXPO_PUBLIC_MONGO_API_URL ?? 'https://wheresmyprofessor-api.rcn.sh';
 
 const EMOTION_EMOJIS = {
   happy: '😊',
@@ -565,7 +565,7 @@ function CameraScreen() {
 
       // Ask backend (Gemini) for an overall emotion score (0–100, 100 = happiest)
       try {
-        const scoreRes = await fetch(`${EMOTION_ML_URL.replace('/analyse', '')}/emotion-score`, {
+        const scoreRes = await fetch(`https://wheresmyprofessor-api.rcn.sh/emotion-score`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ emotions }),
@@ -683,6 +683,8 @@ function CameraScreen() {
       } catch (err) {
         console.warn('Attendance save failed:', err.message);
         console.log('Attendance record:', JSON.stringify(attendanceRecord));
+        showFailureAnimation();
+        return;
       }
 
       // Show checkmark animation
