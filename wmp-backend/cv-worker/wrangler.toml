@@ -17,3 +17,8 @@ MONGODB_DEFAULT_COLLECTION = "WheresMyProfCollection"
 #   wrangler secret put HF_API_KEY
 #   wrangler secret put MONGODB_URI
 # ──────────────────────────────────────────────
+
+[observability]
+[observability.logs]
+enabled = false
+invocation_logs = true
