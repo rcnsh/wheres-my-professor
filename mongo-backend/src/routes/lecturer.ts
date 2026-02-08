@@ -1,7 +1,97 @@
 import { Hono } from 'hono';
+import { ObjectId } from 'mongodb';
+import { z } from 'zod';
 import { getDatabase } from '../services/mongo';
 
 export const lecturerRoute = new Hono();
+
+const COLLECTION = 'Lecturer';
+
+const createLecturerSchema = z.object({
+  lecturer_id: z.string().min(1),
+  fullname: z.string().min(1),
+});
+
+const updateLecturerSchema = z.object({
+  lecturer_id: z.string().min(1).optional(),
+  fullname: z.string().min(1).optional(),
+});
+
+// GET /lecturer — list all lecturers
+lecturerRoute.get('/', async (c) => {
+  const db = await getDatabase();
+  const col = db.collection(COLLECTION);
+
+  const limit = Math.min(Number(c.req.query('limit') || 50), 100);
+  const skip = Number(c.req.query('skip') || 0);
+
+  const results = await col.find({}).skip(skip).limit(limit).toArray();
+  const total = await col.countDocuments({});
+
+  return c.json({ data: results, meta: { total, limit, skip, count: results.length } });
+});
+
+// POST /lecturer — create a new lecturer
+lecturerRoute.post('/', async (c) => {
+  const body = await c.req.json();
+  const parsed = createLecturerSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return c.json({ error: 'Invalid request body', issues: parsed.error.flatten() }, 400);
+  }
+
+  const db = await getDatabase();
+  const col = db.collection(COLLECTION);
+
+  const existing = await col.findOne({ lecturer_id: parsed.data.lecturer_id });
+  if (existing) {
+    return c.json({ error: 'A lecturer with this lecturer_id already exists' }, 409);
+  }
+
+  const result = await col.insertOne(parsed.data);
+  return c.json({ data: { _id: result.insertedId, ...parsed.data } }, 201);
+});
+
+// PUT /lecturer/:lecturerId — update a lecturer
+lecturerRoute.put('/:lecturerId', async (c) => {
+  const lecturerId = c.req.param('lecturerId');
+  const body = await c.req.json();
+  const parsed = updateLecturerSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return c.json({ error: 'Invalid request body', issues: parsed.error.flatten() }, 400);
+  }
+
+  const db = await getDatabase();
+  const col = db.collection(COLLECTION);
+
+  const result = await col.findOneAndUpdate(
+    { lecturer_id: lecturerId },
+    { $set: parsed.data },
+    { returnDocument: 'after' },
+  );
+
+  if (!result) {
+    return c.json({ error: 'Lecturer not found' }, 404);
+  }
+
+  return c.json({ data: result });
+});
+
+// DELETE /lecturer/:lecturerId — delete a lecturer
+lecturerRoute.delete('/:lecturerId', async (c) => {
+  const lecturerId = c.req.param('lecturerId');
+  const db = await getDatabase();
+  const col = db.collection(COLLECTION);
+
+  const result = await col.deleteOne({ lecturer_id: lecturerId });
+
+  if (result.deletedCount === 0) {
+    return c.json({ error: 'Lecturer not found' }, 404);
+  }
+
+  return c.json({ message: 'Deleted successfully' });
+});
 
 // GET /lecturer/:lecturerId/profile
 // Returns lecturer info + aggregated stats: avg engagement, attendance rate, total lectures, active students

@@ -86,26 +86,28 @@ const STEP_PREVIEW = 'preview';
 function AuthScreen() {
   const { signIn, setActive: setSignInActive, isLoaded: isSignInLoaded } = useSignIn();
   const { signUp, setActive: setSignUpActive, isLoaded: isSignUpLoaded } = useSignUp();
-  const { signOut } = useAuth();
 
-  const [mode, setMode] = useState('signin'); // 'signin' | 'signup' | 'verify'
-  const [email, setEmail] = useState('');
+  const [mode, setMode] = useState('signin'); // 'signin' | 'signup'
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
-  const [pendingVerification, setPendingVerification] = useState(false);
 
   async function handleSignIn() {
     if (!isSignInLoaded) return;
     setLoading(true);
     try {
-      // Clear any stale session before attempting sign-in
-      try { await signOut(); } catch {}
-      const result = await signIn.create({ identifier: email, password });
-      if (result.status === 'complete') {
-        await setSignInActive({ session: result.createdSessionId });
+      const result = await signIn.create({ identifier: username, password });
+
+      let current = result;
+
+      if (current.status === 'needs_first_factor') {
+        current = await signIn.attemptFirstFactor({ strategy: 'password', password });
+      }
+
+      if (current.status === 'complete') {
+        await setSignInActive({ session: current.createdSessionId });
       } else {
-        Alert.alert('Sign In', 'Additional steps required. Please try again.');
+        Alert.alert('Sign In Error', 'Could not complete sign in. Please try again.');
       }
     } catch (err) {
       const msg = err?.errors?.[0]?.longMessage || err?.message || 'Sign in failed';
@@ -119,12 +121,21 @@ function AuthScreen() {
     if (!isSignUpLoaded) return;
     setLoading(true);
     try {
-      // Clear any stale session before attempting sign-up
-      try { await signOut(); } catch {}
-      await signUp.create({ emailAddress: email, password });
-      await signUp.prepareEmailAddressVerification({ strategy: 'email_code' });
-      setPendingVerification(true);
-      setMode('verify');
+      const result = await signUp.create({ username, password });
+
+      if (result.status === 'complete') {
+        await setSignUpActive({ session: result.createdSessionId });
+      } else if (result.status === 'missing_requirements') {
+        if (result.createdSessionId) {
+          await setSignUpActive({ session: result.createdSessionId });
+        } else {
+          Alert.alert('Account Created', 'Your account has been created. Please sign in.');
+          setMode('signin');
+          setPassword('');
+        }
+      } else {
+        Alert.alert('Sign Up Error', 'Could not complete sign up. Please try again.');
+      }
     } catch (err) {
       const msg = err?.errors?.[0]?.longMessage || err?.message || 'Sign up failed';
       Alert.alert('Sign Up Error', msg);
@@ -133,77 +144,7 @@ function AuthScreen() {
     }
   }
 
-  async function handleVerify() {
-    if (!isSignUpLoaded) return;
-    setLoading(true);
-    try {
-      const result = await signUp.attemptEmailAddressVerification({ code });
-      if (result.status === 'complete') {
-        await setSignUpActive({ session: result.createdSessionId });
-      } else {
-        Alert.alert('Verification', 'Could not complete verification.');
-      }
-    } catch (err) {
-      const msg = err?.errors?.[0]?.longMessage || err?.message || 'Verification failed';
-      Alert.alert('Verification Error', msg);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // ── Verification code screen ──
-  if (mode === 'verify' && pendingVerification) {
-    return (
-      <LinearGradient colors={['#2E1065', '#000000']} style={styles.authContainer}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.authInner}
-        >
-          <StatusBar style="light" />
-          <View style={styles.authHeader}>
-            <Ionicons name="mail-open-outline" size={48} color="#A78BFA" />
-            <Text style={styles.authTitle}>Check your email</Text>
-            <Text style={styles.authSubtitle}>
-              We sent a verification code to {email}
-            </Text>
-          </View>
-
-          <View style={styles.authForm}>
-            <View style={styles.inputWrapper}>
-              <Ionicons name="key-outline" size={20} color="#A78BFA" style={styles.inputIcon} />
-              <TextInput
-                style={styles.authInput}
-                placeholder="Verification code"
-                placeholderTextColor="#6B7280"
-                value={code}
-                onChangeText={setCode}
-                keyboardType="number-pad"
-                autoFocus
-              />
-            </View>
-
-            <TouchableOpacity
-              style={[styles.authButton, loading && styles.authButtonDisabled]}
-              onPress={handleVerify}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.authButtonText}>Verify Email</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-
-          <TouchableOpacity onPress={() => { setMode('signup'); setPendingVerification(false); setCode(''); }}>
-            <Text style={styles.authSwitchText}>Go back</Text>
-          </TouchableOpacity>
-        </KeyboardAvoidingView>
-      </LinearGradient>
-    );
-  }
-
-  // ── Sign In / Sign Up screen ──
+  // ── Sign In / Sign Up screen — username + password ──
   return (
     <LinearGradient colors={['#2E1065', '#000000']} style={styles.authContainer}>
       <KeyboardAvoidingView
@@ -221,14 +162,13 @@ function AuthScreen() {
 
         <View style={styles.authForm}>
           <View style={styles.inputWrapper}>
-            <Ionicons name="mail-outline" size={20} color="#A78BFA" style={styles.inputIcon} />
+            <Ionicons name="person-outline" size={20} color="#A78BFA" style={styles.inputIcon} />
             <TextInput
               style={styles.authInput}
-              placeholder="Email"
+              placeholder="Username"
               placeholderTextColor="#6B7280"
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
+              value={username}
+              onChangeText={setUsername}
               autoCapitalize="none"
               autoCorrect={false}
             />
@@ -264,7 +204,7 @@ function AuthScreen() {
         <TouchableOpacity
           onPress={() => {
             setMode(mode === 'signin' ? 'signup' : 'signin');
-            setEmail('');
+            setUsername('');
             setPassword('');
           }}
         >
@@ -301,9 +241,9 @@ function AccountScreen() {
   const displayName =
     user?.fullName ||
     user?.firstName ||
-    user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] ||
+    user?.username ||
     'User';
-  const emailAddr = user?.primaryEmailAddress?.emailAddress || '';
+  const usernameStr = user?.username || '';
   const avatarUrl = user?.imageUrl;
   const createdAt = user?.createdAt
     ? new Date(user.createdAt).toLocaleDateString('en-GB', {
@@ -328,7 +268,7 @@ function AccountScreen() {
             </View>
           )}
           <Text style={styles.profileName}>{displayName}</Text>
-          <Text style={styles.profileHandle}>{emailAddr}</Text>
+          <Text style={styles.profileHandle}>@{usernameStr}</Text>
         </View>
 
         {/* Info cards */}
@@ -338,10 +278,10 @@ function AccountScreen() {
 
         <View style={styles.accountCard}>
           <View style={styles.accountRow}>
-            <Ionicons name="mail-outline" size={20} color="#A78BFA" />
+            <Ionicons name="person-outline" size={20} color="#A78BFA" />
             <View style={styles.accountRowInfo}>
-              <Text style={styles.accountRowLabel}>Email</Text>
-              <Text style={styles.accountRowValue}>{emailAddr}</Text>
+              <Text style={styles.accountRowLabel}>Username</Text>
+              <Text style={styles.accountRowValue}>{usernameStr}</Text>
             </View>
           </View>
 
@@ -1356,6 +1296,45 @@ function LecturerProfileScreen() {
 
 const Tab = createBottomTabNavigator();
 
+function MainNavigator() {
+  return (
+    <NavigationContainer>
+      <Tab.Navigator
+        screenOptions={({ route }) => ({
+          tabBarIcon: ({ focused, color, size }) => {
+            let iconName;
+            if (route.name === 'Camera') {
+              iconName = focused ? 'camera' : 'camera-outline';
+            } else if (route.name === 'Student') {
+              iconName = focused ? 'person' : 'person-outline';
+            } else if (route.name === 'Lecturer') {
+              iconName = focused ? 'school' : 'school-outline';
+            } else if (route.name === 'Account') {
+              iconName = focused ? 'settings' : 'settings-outline';
+            }
+            return <Ionicons name={iconName} size={size} color={color} />;
+          },
+          tabBarStyle: {
+            backgroundColor: '#000',
+            borderTopWidth: 0,
+            height: Platform.OS === 'ios' ? 90 : 60,
+            paddingBottom: Platform.OS === 'ios' ? 30 : 10,
+          },
+          tabBarActiveTintColor: '#fff',
+          tabBarInactiveTintColor: '#666',
+          headerShown: false,
+        })}
+      >
+        <Tab.Screen name="Camera" component={CameraScreen} />
+        <Tab.Screen name="Student" component={StudentProfileScreen} />
+        <Tab.Screen name="Lecturer" component={LecturerProfileScreen} />
+        <Tab.Screen name="Account" component={AccountScreen} />
+      </Tab.Navigator>
+    </NavigationContainer>
+  );
+}
+
+
 export default function App() {
   return (
     <ClerkProvider tokenCache={tokenCache} publishableKey={CLERK_PUBLISHABLE_KEY}>
@@ -1364,39 +1343,7 @@ export default function App() {
           <AuthScreen />
         </SignedOut>
         <SignedIn>
-          <NavigationContainer>
-            <Tab.Navigator
-              screenOptions={({ route }) => ({
-                tabBarIcon: ({ focused, color, size }) => {
-                  let iconName;
-                  if (route.name === 'Camera') {
-                    iconName = focused ? 'camera' : 'camera-outline';
-                  } else if (route.name === 'Student') {
-                    iconName = focused ? 'person' : 'person-outline';
-                  } else if (route.name === 'Lecturer') {
-                    iconName = focused ? 'school' : 'school-outline';
-                  } else if (route.name === 'Account') {
-                    iconName = focused ? 'settings' : 'settings-outline';
-                  }
-                  return <Ionicons name={iconName} size={size} color={color} />;
-                },
-                tabBarStyle: {
-                  backgroundColor: '#000',
-                  borderTopWidth: 0,
-                  height: Platform.OS === 'ios' ? 90 : 60,
-                  paddingBottom: Platform.OS === 'ios' ? 30 : 10,
-                },
-                tabBarActiveTintColor: '#fff',
-                tabBarInactiveTintColor: '#666',
-                headerShown: false,
-              })}
-            >
-              <Tab.Screen name="Camera" component={CameraScreen} />
-              <Tab.Screen name="Student" component={StudentProfileScreen} />
-              <Tab.Screen name="Lecturer" component={LecturerProfileScreen} />
-              <Tab.Screen name="Account" component={AccountScreen} />
-            </Tab.Navigator>
-          </NavigationContainer>
+          <MainNavigator />
         </SignedIn>
       </ClerkLoaded>
     </ClerkProvider>
@@ -2156,6 +2103,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
+
 });
 
 

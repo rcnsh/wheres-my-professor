@@ -1,7 +1,97 @@
 import { Hono } from 'hono';
+import { ObjectId } from 'mongodb';
+import { z } from 'zod';
 import { getDatabase } from '../services/mongo';
 
 export const studentRoute = new Hono();
+
+const COLLECTION = 'Student';
+
+const createStudentSchema = z.object({
+  student_id: z.string().min(1),
+  fullname: z.string().min(1),
+});
+
+const updateStudentSchema = z.object({
+  student_id: z.string().min(1).optional(),
+  fullname: z.string().min(1).optional(),
+});
+
+// GET /student — list all students
+studentRoute.get('/', async (c) => {
+  const db = await getDatabase();
+  const col = db.collection(COLLECTION);
+
+  const limit = Math.min(Number(c.req.query('limit') || 50), 100);
+  const skip = Number(c.req.query('skip') || 0);
+
+  const results = await col.find({}).skip(skip).limit(limit).toArray();
+  const total = await col.countDocuments({});
+
+  return c.json({ data: results, meta: { total, limit, skip, count: results.length } });
+});
+
+// POST /student — create a new student
+studentRoute.post('/', async (c) => {
+  const body = await c.req.json();
+  const parsed = createStudentSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return c.json({ error: 'Invalid request body', issues: parsed.error.flatten() }, 400);
+  }
+
+  const db = await getDatabase();
+  const col = db.collection(COLLECTION);
+
+  const existing = await col.findOne({ student_id: parsed.data.student_id });
+  if (existing) {
+    return c.json({ error: 'A student with this student_id already exists' }, 409);
+  }
+
+  const result = await col.insertOne(parsed.data);
+  return c.json({ data: { _id: result.insertedId, ...parsed.data } }, 201);
+});
+
+// PUT /student/:studentId — update a student
+studentRoute.put('/:studentId', async (c) => {
+  const studentId = c.req.param('studentId');
+  const body = await c.req.json();
+  const parsed = updateStudentSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return c.json({ error: 'Invalid request body', issues: parsed.error.flatten() }, 400);
+  }
+
+  const db = await getDatabase();
+  const col = db.collection(COLLECTION);
+
+  const result = await col.findOneAndUpdate(
+    { student_id: studentId },
+    { $set: parsed.data },
+    { returnDocument: 'after' },
+  );
+
+  if (!result) {
+    return c.json({ error: 'Student not found' }, 404);
+  }
+
+  return c.json({ data: result });
+});
+
+// DELETE /student/:studentId — delete a student
+studentRoute.delete('/:studentId', async (c) => {
+  const studentId = c.req.param('studentId');
+  const db = await getDatabase();
+  const col = db.collection(COLLECTION);
+
+  const result = await col.deleteOne({ student_id: studentId });
+
+  if (result.deletedCount === 0) {
+    return c.json({ error: 'Student not found' }, 404);
+  }
+
+  return c.json({ message: 'Deleted successfully' });
+});
 
 // GET /student/:studentId/profile
 // Returns student info + attendance stats + module count

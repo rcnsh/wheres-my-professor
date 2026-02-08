@@ -12,8 +12,6 @@ async function ensureClient(): Promise<MongoClient> {
     throw new Error('Missing MONGODB_URI environment variable.');
   }
 
-  console.log(uri);
-
   mongoClient = new MongoClient(uri);
   await mongoClient.connect();
 

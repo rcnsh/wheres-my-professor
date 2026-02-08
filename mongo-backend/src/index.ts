@@ -4,9 +4,11 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { closeMongo, getDatabase } from './services/mongo';
+import { attendanceRoute } from './routes/attendance';
+import { lectureRoute } from './routes/lecture';
+import { lecturerRoute } from './routes/lecturer';
 import { recordsRoute } from './routes/records';
 import { studentRoute } from './routes/student';
-import { lecturerRoute } from './routes/lecturer';
 
 const app = new Hono();
 
@@ -24,9 +26,11 @@ app.get('/health', async (c) => {
   }
 });
 
+app.route('/attendance', attendanceRoute);
+app.route('/lecture', lectureRoute);
+app.route('/lecturer', lecturerRoute);
 app.route('/records', recordsRoute);
 app.route('/student', studentRoute);
-app.route('/lecturer', lecturerRoute);
 
 const port = Number(process.env.PORT ?? 8787);
 
