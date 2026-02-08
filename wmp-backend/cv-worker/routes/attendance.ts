@@ -12,6 +12,7 @@ const createAttendanceSchema = z.object({
   lecture_id: z.string().min(1),
   student_id: z.string().min(1),
   emotion_score: z.number().min(0).max(100),
+  timestamp: z.string().min(1),
 });
 
 const updateAttendanceSchema = z.object({

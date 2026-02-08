@@ -44,7 +44,6 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const CLERK_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
 const EMOTION_ML_URL = process.env.EXPO_PUBLIC_EMOTION_ML_URL ?? 'https://wheresmyprofessor-api.rcn.sh/analyse';
-const SAVE_URL = process.env.EXPO_PUBLIC_SAVE_URL ?? 'http://localhost:3000/api/save';
 const MONGO_API_URL = process.env.EXPO_PUBLIC_MONGO_API_URL ?? 'https://reserveless-nonlixiviated-jamarion.ngrok-free.dev';
 
 const EMOTION_EMOJIS = {
@@ -363,6 +362,7 @@ function AccountScreen() {
 
 
 function CameraScreen() {
+  const { user } = useUser();
   const { hasPermission, requestPermission } = useCameraPermission();
   const backDevice = useCameraDevice('back');
   const frontDevice = useCameraDevice('front');
@@ -375,6 +375,7 @@ function CameraScreen() {
   const [frontBase64, setFrontBase64] = useState(null);
   const [sending, setSending] = useState(false);
   const [emotionData, setEmotionData] = useState(null);
+  const [emotionScore, setEmotionScore] = useState(null);
   const [professorData, setProfessorData] = useState(null);
   const [saving, setSaving] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -484,6 +485,7 @@ function CameraScreen() {
     setBackBase64(null);
     setFrontBase64(null);
     setEmotionData(null);
+    setEmotionScore(null);
     setProfessorData(null);
     setStep(STEP_BACK);
   }
@@ -492,6 +494,7 @@ function CameraScreen() {
     if (!backPhotoPath || !frontPhotoPath) return;
     setSending(true);
     setEmotionData(null);
+    setEmotionScore(null);
     setProfessorData(null);
     try {
       // Convert both to base64
@@ -559,6 +562,25 @@ function CameraScreen() {
 
       setEmotionData(emotions);
       setProfessorData(professor);
+
+      // Ask backend (Gemini) for an overall emotion score (0–100, 100 = happiest)
+      try {
+        const scoreRes = await fetch(`${EMOTION_ML_URL.replace('/analyse', '')}/emotion-score`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ emotions }),
+        });
+        if (scoreRes.ok) {
+          const { score } = await scoreRes.json();
+          setEmotionScore(score);
+        } else {
+          console.warn('Emotion score endpoint failed:', scoreRes.status);
+          setEmotionScore(null);
+        }
+      } catch (err) {
+        console.warn('Emotion score request failed:', err.message);
+        setEmotionScore(null);
+      }
     } catch (e) {
       Alert.alert('Send failed', e?.message ?? 'Unknown error');
     } finally {
@@ -572,6 +594,7 @@ function CameraScreen() {
     setBackBase64(null);
     setFrontBase64(null);
     setEmotionData(null);
+    setEmotionScore(null);
     setProfessorData(null);
     setSaving(false);
     setShowSuccess(false);
@@ -642,48 +665,24 @@ function CameraScreen() {
         return;
       }
 
-      // 3. Within range — proceed with save
-      const topEmotions = emotionData.slice(0, 2).map((e) => ({
-        label: e.label,
-        score: e.score,
-      }));
-
-      const record = {
-        emotions: topEmotions,
-        professor: {
-          name: professorData.name,
-          confidence: professorData.confidence,
-        },
-        images: {
-          front: frontBase64,
-          back: backBase64,
-        },
-        location: {
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-          distanceFromTarget: distance,
-        },
+      // 3. Within range — save attendance to MongoDB
+      const attendanceRecord = {
+        student_id: user?.username ?? '',
+        lecture_id: professorData.name,
+        emotion_score: emotionScore ?? 50,
         timestamp: new Date().toISOString(),
       };
 
       try {
-        const response = await fetch(SAVE_URL, {
+        const response = await fetch(`${MONGO_API_URL}/attendance`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(record),
+          body: JSON.stringify(attendanceRecord),
         });
         if (!response.ok) throw new Error(`Server responded with ${response.status}`);
       } catch (err) {
-        // Dummy fallback — just log while backend is not available
-        console.warn('Save backend unavailable, data logged locally:', err.message);
-        console.log('Record to save:', JSON.stringify({
-          emotions: record.emotions,
-          professor: record.professor,
-          location: record.location,
-          timestamp: record.timestamp,
-          frontImageLength: record.images.front?.length,
-          backImageLength: record.images.back?.length,
-        }));
+        console.warn('Attendance save failed:', err.message);
+        console.log('Attendance record:', JSON.stringify(attendanceRecord));
       }
 
       // Show checkmark animation

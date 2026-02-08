@@ -16,6 +16,7 @@ MONGODB_DEFAULT_COLLECTION = "WheresMyProfCollection"
 #   wrangler secret put PYTHON_EMBEDDING_URL
 #   wrangler secret put HF_API_KEY
 #   wrangler secret put MONGODB_URI
+#   wrangler secret put GEMINI_API_KEY
 # ──────────────────────────────────────────────
 
 [observability]

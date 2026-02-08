@@ -80,6 +80,57 @@ app.post("/analyse", async (c) => {
   }
 });
 
+app.post("/emotion-score", async (c) => {
+  try {
+    const { emotions } = await c.req.json();
+
+    if (!emotions || !Array.isArray(emotions)) {
+      return c.json({ error: "Missing 'emotions' array" }, 400);
+    }
+
+    const emotionSummary = emotions
+      .map((e: any) => `${e.label}: ${(e.score * 100).toFixed(1)}%`)
+      .join(", ");
+
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${c.env.GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: `Given the following facial emotion analysis results: ${emotionSummary}. Rate the overall emotion on a scale from 0 to 100, where 100 is the happiest and 0 is the saddest. Respond with ONLY a single integer number, nothing else.`,
+                },
+              ],
+            },
+          ],
+        }),
+      }
+    );
+
+    if (!geminiRes.ok) {
+      const errText = await geminiRes.text().catch(() => "");
+      throw new Error(`Gemini API responded with ${geminiRes.status}: ${errText}`);
+    }
+
+    const data: any = await geminiRes.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? "";
+    const score = parseInt(text, 10);
+
+    if (isNaN(score) || score < 0 || score > 100) {
+      return c.json({ error: "Gemini returned unexpected value", raw: text }, 502);
+    }
+
+    return c.json({ score });
+  } catch (err: any) {
+    console.error("Emotion score error:", err);
+    return c.json({ error: err.message ?? "Internal server error" }, 500);
+  }
+});
+
 app.post("/search", async (c) => {
   try {
     const { image, topK, threshold } = await c.req.json();
