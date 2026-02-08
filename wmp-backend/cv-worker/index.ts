@@ -30,6 +30,7 @@ app.post("/analyse", async (c) => {
       method: "POST",
       headers: {
         "Content-Type": "application/octet-stream",
+        "Authorization": `Bearer ${c.env.HF_API_KEY}`,
       },
       body: bytes,
     });
