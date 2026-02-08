@@ -208,19 +208,27 @@ function CameraScreen() {
         // Back (scene) → professor identification
         (async () => {
           try {
-            const response = await fetch(VISION_BACKEND_URL, {
+            const response = await fetch('https://wheresmyprofessor-api.rcn.sh/search', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ image: back64, timestamp }),
+              body: JSON.stringify({ image: back64}),
             });
             if (!response.ok) throw new Error(`Server responded with ${response.status}`);
-            return await response.json();
+            const data = await response.json();
+            
+            // Pipe the specific API response structure (topMatch) into the component
+            if (data.found && data.topMatch) {
+              return {
+                name: data.topMatch.personName || 'Unknown Professor',
+                confidence: data.topMatch.confidence / 100, // API sends 0-100, component expects 0-1
+              };
+            }
+            throw new Error('No matches found');
           } catch (err) {
-            console.warn('Vision backend unavailable, using dummy data:', err.message);
+            console.warn('Vision backend unavailable or no match:', err.message);
             return {
-              name: 'Dr. Smith',
-              confidence: 0.92,
-              department: 'Computer Science',
+              name: 'Unknown Professor',
+              confidence: 0.00,
             };
           }
         })(),
@@ -264,7 +272,6 @@ function CameraScreen() {
         professor: {
           name: professorData.name,
           confidence: professorData.confidence,
-          department: professorData.department,
         },
         images: {
           front: frontBase64,
@@ -346,7 +353,6 @@ function CameraScreen() {
             <Text style={styles.professorIcon}>🎓</Text>
             <View style={styles.professorInfo}>
               <Text style={styles.professorName}>{professorData.name}</Text>
-              <Text style={styles.professorDept}>{professorData.department}</Text>
               <Text style={styles.professorConfidence}>
                 {(professorData.confidence * 100).toFixed(0)}% match
               </Text>
@@ -1315,12 +1321,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '800',
-  },
-  professorDept: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 12,
-    fontWeight: '500',
-    marginTop: 1,
   },
   professorConfidence: {
     color: '#22C55E',
