@@ -198,6 +198,22 @@ export class FaceRecognitionClient {
   }
 
   /**
+   * Search by base64 image
+   */
+
+  async searchByBase64(
+    base64Image: string,
+    options: {
+      topK?: number;
+      threshold?: number;
+    } = {}
+  ): Promise<SearchResult> {
+    const imageBuffer = Buffer.from(base64Image, 'base64');
+    return this.searchByFile(imageBuffer, options);
+  }
+
+
+  /**
    * List all registered people (unique names)
    */
   async listPeople(limit: number = 100): Promise<Array<{

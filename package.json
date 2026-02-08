@@ -1,0 +1,8 @@
+{
+	"devDependencies": {
+		"@types/node": "^25.2.2"
+	},
+	"dependencies": {
+		"weaviate-client": "^3.11.0"
+	}
+}
