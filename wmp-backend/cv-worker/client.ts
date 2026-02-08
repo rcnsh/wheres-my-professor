@@ -5,13 +5,8 @@
 
 // --- Types ---
 
-export interface Env {
-  WEAVIATE_CLUSTER_URL: string;
-  WEAVIATE_API_KEY: string;
-  PYTHON_EMBEDDING_URL: string;
-  HF_EMOTION_URL: string;
-  HF_API_KEY: string;
-}
+export type { Env } from "./env";
+import type { Env } from "./env";
 
 export interface FaceMatch {
   personName: string;

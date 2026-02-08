@@ -1,10 +1,16 @@
-import { Hono } from 'hono';
-import { z } from 'zod';
-import { getCollection } from '../services/mongo';
+import { Hono } from "hono";
+import { z } from "zod";
+import type { Env } from "../env";
+import { getCollection } from "../mongo";
 
-function flattenQueries(params: Record<string, string[]>): Record<string, string | undefined> {
+function flattenQueries(
+  params: Record<string, string[]>
+): Record<string, string | undefined> {
   return Object.fromEntries(
-    Object.entries(params).map(([key, value]) => [key, value[value.length - 1]])
+    Object.entries(params).map(([key, value]) => [
+      key,
+      value[value.length - 1],
+    ])
   );
 }
 
@@ -24,43 +30,41 @@ const gatewayQuerySchema = z.object({
   skip: z.number().int().min(0).max(1_000).default(0),
 });
 
-export const recordsRoute = new Hono();
+export const recordsRoute = new Hono<{ Bindings: Env }>();
 
-recordsRoute.get('/', async (c) => {
+recordsRoute.get("/", async (c) => {
   const parsed = listQuerySchema.safeParse(flattenQueries(c.req.queries()));
   if (!parsed.success) {
-    return c.json({ error: 'Invalid query parameters', issues: parsed.error.flatten() }, 400);
+    return c.json(
+      { error: "Invalid query parameters", issues: parsed.error.flatten() },
+      400
+    );
   }
 
   const { limit, skip, q, collection } = parsed.data;
-  const col = await getCollection(collection);
+  const col = await getCollection(c.env, collection);
   const filter = q ? { $text: { $search: q } } : {};
 
-  const results = await col
-    .find(filter)
-    .skip(skip)
-    .limit(limit)
-    .toArray();
+  const results = await col.find(filter).skip(skip).limit(limit).toArray();
 
   return c.json({
     data: results,
-    meta: {
-      limit,
-      skip,
-      count: results.length,
-    },
+    meta: { limit, skip, count: results.length },
   });
 });
 
-recordsRoute.post('/query', async (c) => {
+recordsRoute.post("/query", async (c) => {
   const body = await c.req.json();
   const parsed = gatewayQuerySchema.safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: 'Invalid request body', issues: parsed.error.flatten() }, 400);
+    return c.json(
+      { error: "Invalid request body", issues: parsed.error.flatten() },
+      400
+    );
   }
 
   const { collection, filter, projection, sort, skip, limit } = parsed.data;
-  const col = await getCollection(collection);
+  const col = await getCollection(c.env, collection);
 
   const cursor = col.find(filter, { projection }).skip(skip).limit(limit);
   if (sort) {
@@ -71,10 +75,6 @@ recordsRoute.post('/query', async (c) => {
 
   return c.json({
     data: results,
-    meta: {
-      limit,
-      skip,
-      count: results.length,
-    },
+    meta: { limit, skip, count: results.length },
   });
 });

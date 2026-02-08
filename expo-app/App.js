@@ -88,6 +88,8 @@ function AuthScreen() {
   const { signUp, setActive: setSignUpActive, isLoaded: isSignUpLoaded } = useSignUp();
 
   const [mode, setMode] = useState('signin'); // 'signin' | 'signup'
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -119,9 +121,13 @@ function AuthScreen() {
 
   async function handleSignUp() {
     if (!isSignUpLoaded) return;
+    if (!firstName.trim() || !lastName.trim()) {
+      Alert.alert('Sign Up Error', 'Please provide both first and last name.');
+      return;
+    }
     setLoading(true);
     try {
-      const result = await signUp.create({ username, password });
+      const result = await signUp.create({ firstName, lastName, username, password });
 
       if (result.status === 'complete') {
         await setSignUpActive({ session: result.createdSessionId });
@@ -161,6 +167,33 @@ function AuthScreen() {
         </View>
 
         <View style={styles.authForm}>
+          {mode === 'signup' && (
+            <View style={styles.nameRow}>
+              <View style={[styles.inputWrapper, { flex: 1, marginRight: 8 }]}>
+                <Ionicons name="person-outline" size={20} color="#A78BFA" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.authInput}
+                  placeholder="First Name"
+                  placeholderTextColor="#6B7280"
+                  value={firstName}
+                  onChangeText={setFirstName}
+                  autoCorrect={false}
+                />
+              </View>
+              <View style={[styles.inputWrapper, { flex: 1 }]}>
+                <Ionicons name="person-outline" size={20} color="#A78BFA" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.authInput}
+                  placeholder="Last Name"
+                  placeholderTextColor="#6B7280"
+                  value={lastName}
+                  onChangeText={setLastName}
+                  autoCorrect={false}
+                />
+              </View>
+            </View>
+          )}
+
           <View style={styles.inputWrapper}>
             <Ionicons name="person-outline" size={20} color="#A78BFA" style={styles.inputIcon} />
             <TextInput
@@ -204,6 +237,8 @@ function AuthScreen() {
         <TouchableOpacity
           onPress={() => {
             setMode(mode === 'signin' ? 'signup' : 'signin');
+            setFirstName('');
+            setLastName('');
             setUsername('');
             setPassword('');
           }}
@@ -890,13 +925,11 @@ function CameraScreen() {
 }
 
 
-const STUDENT_ID = 's1111111-1111-1111-1111-111111111111'; // TODO: replace with auth context
-const LECTURER_ID = '11111111-1111-1111-1111-111111111111';     // TODO: replace with auth context
-
 function StudentProfileScreen() {
+  const { user } = useUser();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ attendance: 0, modules: 0 });
-  const [studentName, setStudentName] = useState('');
+  const [studentName, setStudentName] = useState(user?.fullName ?? '');
   const [schedule, setSchedule] = useState([]);
   const [selectedDay, setSelectedDay] = useState(0);
 
@@ -927,8 +960,8 @@ function StudentProfileScreen() {
       setLoading(true);
       try {
         const [profileRes, scheduleRes] = await Promise.all([
-          fetch(`${MONGO_API_URL}/student/${STUDENT_ID}/profile`),
-          fetch(`${MONGO_API_URL}/student/${STUDENT_ID}/schedule?date=${weekDays[selectedDay].isoDate}`),
+          fetch(`${MONGO_API_URL}/student/${user?.username}/profile`),
+          fetch(`${MONGO_API_URL}/student/${user?.username}/schedule?date=${weekDays[selectedDay].isoDate}`),
         ]);
         if (profileRes.ok) {
           const profile = await profileRes.json();
@@ -952,7 +985,7 @@ function StudentProfileScreen() {
     (async () => {
       try {
         const res = await fetch(
-          `${MONGO_API_URL}/student/${STUDENT_ID}/schedule?date=${weekDays[selectedDay].isoDate}`
+          `${MONGO_API_URL}/student/${user?.username}/schedule?date=${weekDays[selectedDay].isoDate}`
         );
         if (res.ok) {
           const data = await res.json();
@@ -1015,7 +1048,7 @@ function StudentProfileScreen() {
             <Ionicons name="person" size={40} color="#DDD6FE" />
           </View>
           <Text style={styles.profileName}>{studentName || 'Student'}</Text>
-          <Text style={styles.profileHandle}>Student ID: {STUDENT_ID}</Text>
+          <Text style={styles.profileHandle}>Student ID: {user?.username}</Text>
         </View>
 
         <View style={styles.analyticsTitleRow}>
@@ -1085,6 +1118,8 @@ function StudentProfileScreen() {
 
 
 function LecturerProfileScreen() {
+  const { user } = useUser();
+
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     avgEngagement: 0,
@@ -1092,7 +1127,7 @@ function LecturerProfileScreen() {
     totalLectures: 0,
     activeStudents: 0,
   });
-  const [lecturerName, setLecturerName] = useState('');
+  const [lecturerName, setLecturerName] = useState(user?.fullName ?? '');
   const [heatmapRaw, setHeatmapRaw] = useState([]);
   const [nextSession, setNextSession] = useState(null);
 
@@ -1101,9 +1136,9 @@ function LecturerProfileScreen() {
       setLoading(true);
       try {
         const [profileRes, heatmapRes, sessionRes] = await Promise.all([
-          fetch(`${MONGO_API_URL}/lecturer/${LECTURER_ID}/profile`),
-          fetch(`${MONGO_API_URL}/lecturer/${LECTURER_ID}/heatmap`),
-          fetch(`${MONGO_API_URL}/lecturer/${LECTURER_ID}/next-session`),
+          fetch(`${MONGO_API_URL}/lecturer/${user?.username}/profile`),
+          fetch(`${MONGO_API_URL}/lecturer/${user?.username}/heatmap`),
+          fetch(`${MONGO_API_URL}/lecturer/${user?.username}/next-session`),
         ]);
         if (profileRes.ok) {
           const data = await profileRes.json();
@@ -1187,7 +1222,7 @@ function LecturerProfileScreen() {
             <Ionicons name="school" size={40} color="#DDD6FE" />
           </View>
           <Text style={styles.profileName}>{lecturerName || 'Lecturer'}</Text>
-          <Text style={styles.profileHandle}>Lecturer ID: {LECTURER_ID}</Text>
+          <Text style={styles.profileHandle}>Lecturer ID: {user?.username}</Text>
         </View>
 
         <View style={styles.analyticsTitleRow}>
@@ -2007,6 +2042,9 @@ const styles = StyleSheet.create({
   authForm: {
     gap: 16,
     marginBottom: 24,
+  },
+  nameRow: {
+    flexDirection: 'row',
   },
   inputWrapper: {
     flexDirection: 'row',

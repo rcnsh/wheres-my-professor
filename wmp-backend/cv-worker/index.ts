@@ -1,14 +1,33 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { type Env, searchByBase64, listPeople, getStats } from "./client";
+import { getDatabase } from "./mongo";
+import { attendanceRoute } from "./routes/attendance";
+import { lectureRoute } from "./routes/lecture";
+import { lecturerRoute } from "./routes/lecturer";
+import { recordsRoute } from "./routes/records";
+import { studentRoute } from "./routes/student";
 
 const app = new Hono<{ Bindings: Env }>();
 
 app.use("*", cors());
 
+// ── Health ──
 app.get("/", (c) => c.json({ status: "ok" }));
 
-// ── Emotion analysis (proxies to HuggingFace) ──
+app.get("/health", async (c) => {
+  try {
+    const db = await getDatabase(c.env);
+    await db.command({ ping: 1 });
+    return c.json({ ok: true, mongo: "reachable" });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return c.json({ ok: false, mongo: message }, 503);
+  }
+});
+
+// ── CV / Face Recognition routes ──
+
 app.post("/analyse", async (c) => {
   try {
     const { image } = await c.req.json();
@@ -30,7 +49,7 @@ app.post("/analyse", async (c) => {
       method: "POST",
       headers: {
         "Content-Type": "image/jpeg",
-        "Authorization": `Bearer ${c.env.HF_API_KEY}`,
+        Authorization: `Bearer ${c.env.HF_API_KEY}`,
       },
       body: bytes,
     });
@@ -101,5 +120,12 @@ app.get("/stats", async (c) => {
     return c.json({ error: err.message ?? "Internal server error" }, 500);
   }
 });
+
+// ── MongoDB CRUD routes ──
+app.route("/attendance", attendanceRoute);
+app.route("/lecture", lectureRoute);
+app.route("/lecturer", lecturerRoute);
+app.route("/records", recordsRoute);
+app.route("/student", studentRoute);
 
 export default app;

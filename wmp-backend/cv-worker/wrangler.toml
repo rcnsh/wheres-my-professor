@@ -1,15 +1,19 @@
 name = "cv-worker"
 main = "index.ts"
 compatibility_date = "2025-12-01"
-
-# Non-secret vars go here
-# [vars]
-# PYTHON_EMBEDDING_URL = "https://..."
+compatibility_flags = ["nodejs_compat"]
 
 [vars]
 HF_EMOTION_URL = "https://qhk70knfq84x17io.eu-west-1.aws.endpoints.huggingface.cloud"
+MONGODB_DB_NAME = "WheresMyProfDB"
+MONGODB_DEFAULT_COLLECTION = "WheresMyProfCollection"
 
-# Secrets are set via CLI:
+# ──────────────────────────────────────────────
+# Secrets — set via CLI (never commit these!):
+#
 #   wrangler secret put WEAVIATE_CLUSTER_URL
 #   wrangler secret put WEAVIATE_API_KEY
 #   wrangler secret put PYTHON_EMBEDDING_URL
+#   wrangler secret put HF_API_KEY
+#   wrangler secret put MONGODB_URI
+# ──────────────────────────────────────────────
